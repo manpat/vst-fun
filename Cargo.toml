@@ -1,0 +1,19 @@
+[package]
+name = "vst-gui"
+version = "0.0.1"
+authors = ["Patrick Monaghan <0x5f.manpat@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+vst = "0.0.2"
+log = "0.4.5"
+simplelog = "0.5.3"
+voi-synth = { git = "https://github.com/manpat/voi-synth" }
+
+[dependencies.conrod]
+version = "0.61.1"
+features = ["winit", "glium"]
+
+[lib]
+name = "vstguitest"
+crate-type = ["cdylib"]
