@@ -9,6 +9,7 @@ vst = "0.0.2"
 log = "0.4.5"
 simplelog = "0.5.3"
 voi-synth = { git = "https://github.com/manpat/voi-synth" }
+dirs = "1.0.5"
 
 [dependencies.conrod]
 version = "0.61.1"

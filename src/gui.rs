@@ -32,14 +32,21 @@ impl Window {
         LOGGER_INIT.call_once(|| {
             use simplelog::*;
             use std::fs::File;
+            use std::fs;
 
             std::env::set_var("RUST_BACKTRACE", "1");
 
-            WriteLogger::init(
-                LevelFilter::Info,
-                Config::default(),
-                File::create("/home/patrick/.vst/vst-gui.log").unwrap()
-            ).unwrap();
+            let log_dir = dirs::data_dir().unwrap().join("_manpat");
+
+            fs::create_dir_all(&log_dir).unwrap();
+
+            if let Ok(file) = File::create(log_dir.join("vst-gui.log")) {
+                WriteLogger::init(
+                    LevelFilter::Info,
+                    Config::default(),
+                    file
+                ).unwrap();
+            }
 
             info!("Logging enabled");
         });

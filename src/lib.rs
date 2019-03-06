@@ -1,6 +1,7 @@
 #[macro_use] extern crate vst;
 #[macro_use] extern crate conrod;
 #[macro_use] extern crate log;
+extern crate dirs;
 extern crate simplelog;
 extern crate voi_synth;
 
