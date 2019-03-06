@@ -1,9 +1,5 @@
-#[macro_use] extern crate vst;
-#[macro_use] extern crate conrod;
-#[macro_use] extern crate log;
-extern crate dirs;
-extern crate simplelog;
-extern crate voi_synth;
+use log::{info, warn};
+use vst::plugin_main;
 
 use vst::plugin::{Info, CanDo, Plugin, Category as VstCategory};
 use vst::editor::Editor;
@@ -11,14 +7,17 @@ use vst::buffer::AudioBuffer as VstAudioBuffer;
 use vst::api::Supported as VstSupported;
 use vst::api::Events as VstEvents;
 
-use std::rc::Rc;
-use std::cell::RefCell;
+mod model;
+mod view;
 
-mod gui;
+use model::Model;
+use view::View;
 
 struct BasicPlugin {
-    window: gui::Window,
-    synth_ctx: Rc<RefCell<voi_synth::Context>>,
+    synth_view: View,
+    synth_ctx: voi_synth::Context,
+
+    prev_model: Model,
 
     parameters: Vec<voi_synth::ParameterID>,
     num_keys_down: u32,
@@ -41,7 +40,7 @@ impl Plugin for BasicPlugin {
         }
     }
 
-    fn get_editor(&mut self) -> Option<&mut dyn Editor> { Some(&mut self.window) }
+    fn get_editor(&mut self) -> Option<&mut dyn Editor> { Some(&mut self.synth_view) }
 
     fn can_do(&self, can_do: CanDo) -> VstSupported {
         match can_do {
@@ -50,13 +49,24 @@ impl Plugin for BasicPlugin {
         }
     }
 
-    fn set_block_size(&mut self, size: i64) { self.synth_ctx.borrow_mut().set_buffer_size(size as _) }
-    fn set_sample_rate(&mut self, rate: f32) { self.synth_ctx.borrow().set_sample_rate(rate) }
+    fn set_block_size(&mut self, size: i64) { self.synth_ctx.set_buffer_size(size as _) }
+    fn set_sample_rate(&mut self, rate: f32) { self.synth_ctx.set_sample_rate(rate) }
 
     fn process(&mut self, out_buf: &mut VstAudioBuffer<f32>) {
         assert!(out_buf.output_count() == 1);
 
-        let buf = self.synth_ctx.borrow().get_ready_buffer().expect("Failed to get ready buffer");
+        // NOTE: this is probably too late
+        let model = self.synth_view.model();
+
+        for (pos, val) in model.diff_with(self.prev_model) {
+            self.synth_ctx.set_parameter(self.parameters[pos], val);
+        }
+
+        self.prev_model = model;
+
+
+
+        let buf = self.synth_ctx.get_ready_buffer().expect("Failed to get ready buffer");
 
         if buf.len() == out_buf.samples() {
             let out_buf = out_buf.split().1.get_mut(0);
@@ -65,7 +75,7 @@ impl Plugin for BasicPlugin {
             warn!("Buffer size mismatch in plugin process");
         }
 
-        self.synth_ctx.borrow().queue_empty_buffer(buf).unwrap();
+        self.synth_ctx.queue_empty_buffer(buf).unwrap();
     }
 
     fn process_events(&mut self, events: &VstEvents) {
@@ -155,12 +165,15 @@ impl Default for BasicPlugin {
             wonk_a, wonk_b,
         ];
 
-        let synth_ctx = Rc::new(RefCell::new(synth_ctx));
-        let ui_ctx = gui::Context::new(synth_ctx.clone(), parameters.clone());
+        let model = Model::default();
+        for (pos, val) in model.parameter_iter() {
+            synth_ctx.set_parameter(parameters[pos], val);
+        }
 
         BasicPlugin {
-            window: gui::Window::new(ui_ctx),
+            synth_view: View::new(model),
             synth_ctx,
+            prev_model: model,
 
             parameters,
 
@@ -193,8 +206,8 @@ impl BasicPlugin {
 
     fn note_on(&mut self, key: u8, velocity: u8) {
         let freq = 440.0 * 2.0f32.powf((key as f32 - 64.0) / 12.0);
-        self.synth_ctx.borrow().set_parameter(self.parameters[0], freq);
-        self.synth_ctx.borrow().set_parameter(self.parameters[1], velocity as f32 / 127.0);
+        self.synth_ctx.set_parameter(self.parameters[0], freq);
+        self.synth_ctx.set_parameter(self.parameters[1], velocity as f32 / 127.0);
 
         self.num_keys_down += 1;
     }
@@ -202,7 +215,7 @@ impl BasicPlugin {
     fn note_off(&mut self, key: u8) {
         self.num_keys_down = self.num_keys_down.saturating_sub(1);
         if self.num_keys_down == 0 {
-            self.synth_ctx.borrow().set_parameter(self.parameters[1], 0.0);
+            self.synth_ctx.set_parameter(self.parameters[1], 0.0);
         }
     }
 }

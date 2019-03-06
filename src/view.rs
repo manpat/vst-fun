@@ -1,18 +1,20 @@
 use conrod::backend::glium::{glium, glium::glutin, Renderer as GliumRenderer};
 use vst::editor::Editor;
 
+use conrod::widget_ids;
 use conrod::color::hsl;
 use conrod::utils::degrees;
 
-use std::rc::Rc;
-use std::cell::RefCell;
-use std::sync::Once;
+use log::info;
 
+use crate::model::Model;
+
+use std::sync::Once;
 static LOGGER_INIT: Once = Once::new();
 
 const WINDOW_SIZE: (u32, u32) = (440, 260);
 
-pub struct Window {
+pub struct View {
     ui: conrod::Ui,
     ids: Ids,
 
@@ -24,11 +26,12 @@ pub struct Window {
 
     visible: bool,
 
-    ui_ctx: Context,
+    model: Model,
+    view_state: ViewState,
 }
 
-impl Window {
-    pub fn new(ui_ctx: Context) -> Window {
+impl View {
+    pub fn new(init_state: Model) -> View {
         LOGGER_INIT.call_once(|| {
             use simplelog::*;
             use std::fs::File;
@@ -75,7 +78,7 @@ impl Window {
 
         let ids = Ids::new(ui.widget_id_generator());
 
-        Window {
+        View {
             ui,
             ids,
 
@@ -86,15 +89,18 @@ impl Window {
 
             visible: false,
 
-            ui_ctx,
+            model: init_state,
+            view_state: ViewState::new(),
         }
     }
+
+    pub fn model(&self) -> Model { self.model }
 }
 
 
 use std::ffi::c_void;
 
-impl Editor for Window {
+impl Editor for View {
     fn size(&self) -> (i32, i32) { (200, 100) }
     fn position(&self) -> (i32, i32) { (0, 0) }
 
@@ -133,7 +139,7 @@ impl Editor for Window {
             }
         }
 
-        set_widgets(&mut self.ui.set_widgets(), &self.ids, &mut self.ui_ctx);
+        set_widgets(&mut self.ui.set_widgets(), &self.ids, &mut self.view_state, &mut self.model);
 
         // Render the `Ui` and then display it on the screen.
         if let Some(primitives) = self.ui.draw_if_changed() {
@@ -177,35 +183,18 @@ fn theme() -> conrod::Theme {
 
 
 
-pub struct Context {
-    synth_ctx: Rc<RefCell<voi_synth::Context>>,
-    params: Vec<voi_synth::ParameterID>,
-
+struct ViewState {
     about: bool,
-    cutoff_dip: f32,
-    wonk: (f32, f32),
-    lfo_depth: f32,
-    filter_lfo_depth: f32,
 }
 
-impl Context {
-    pub fn new(synth_ctx: Rc<RefCell<voi_synth::Context>>, params: Vec<voi_synth::ParameterID>) -> Self {
-        Context {
-            synth_ctx,
-            params,
-
-            about: false,
-
-            cutoff_dip: 100.0,
-            wonk: (0.0, 0.0),
-            lfo_depth: 5.0,
-            filter_lfo_depth: 50.0,
-        }
+impl ViewState {
+    fn new() -> Self {
+        ViewState { about: false, }
     }
 }
 
 
-fn set_widgets(ui: &mut conrod::UiCell, ids: &Ids, ctx: &mut Context) {
+fn set_widgets(ui: &mut conrod::UiCell, ids: &Ids, ctx: &mut ViewState, model: &mut Model) {
     use conrod::*;
     use conrod::widget::*;
     use conrod::position::*;
@@ -241,7 +230,7 @@ fn set_widgets(ui: &mut conrod::UiCell, ids: &Ids, ctx: &mut Context) {
     }
 
 
-    let cutoff_dip = Slider::new(ctx.cutoff_dip, 25.0, 900.0)
+    let cutoff_dip = Slider::new(model.cutoff_dip, 25.0, 900.0)
         .w_h(200.0, 20.0)
         .skew(1.3)
         .label("cutoff dip")
@@ -249,8 +238,7 @@ fn set_widgets(ui: &mut conrod::UiCell, ids: &Ids, ctx: &mut Context) {
         .set(ids.cutoff_dip_slider, ui);
 
     if let Some(v) = cutoff_dip {
-        ctx.synth_ctx.borrow().set_parameter(ctx.params[2], v);
-        ctx.cutoff_dip = v;
+        model.cutoff_dip = v;
     }
 
 
@@ -259,30 +247,26 @@ fn set_widgets(ui: &mut conrod::UiCell, ids: &Ids, ctx: &mut Context) {
     let wonk_amt_b = 1.0;
 
     let wonk_xy = XYPad::new(
-            ctx.wonk.0, -wonk_amt_a, wonk_amt_a,
-            ctx.wonk.1, -wonk_amt_b, wonk_amt_b)
+            model.wonk.0, -wonk_amt_a, wonk_amt_a,
+            model.wonk.1, -wonk_amt_b, wonk_amt_b)
         .w_h(200.0, 200.0)
         .label("wonk")
         .set(ids.wonk_xypad, ui);
 
     if let Some(wonk) = wonk_xy {
-        ctx.synth_ctx.borrow().set_parameter(ctx.params[5], wonk.0);
-        ctx.synth_ctx.borrow().set_parameter(ctx.params[6], wonk.1);
-        ctx.wonk = wonk;
+        model.wonk = wonk;
     }
 
 
-    let lfo_xy = XYPad::new(ctx.lfo_depth, 0.0, 20.0,  ctx.filter_lfo_depth, 0.0, 100.0)
+    let lfo_xy = XYPad::new(model.lfo_depth, 0.0, 20.0,  model.filter_lfo_depth, 0.0, 100.0)
         .w_h(200.0, 200.0)
         .label("lfo")
         .right_from(ids.wonk_xypad, 10.0)
         .set(ids.lfo_xypad, ui);
 
     if let Some((x, y)) = lfo_xy {
-        ctx.synth_ctx.borrow().set_parameter(ctx.params[3], x);
-        ctx.synth_ctx.borrow().set_parameter(ctx.params[4], y);
-        ctx.lfo_depth = x;
-        ctx.filter_lfo_depth = y;
+        model.lfo_depth = x;
+        model.filter_lfo_depth = y;
     }
 
 
