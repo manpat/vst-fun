@@ -5,8 +5,6 @@ use conrod::widget_ids;
 use conrod::color::hsl;
 use conrod::utils::degrees;
 
-use log::info;
-
 use crate::model::Model;
 
 use std::sync::Once;
@@ -14,17 +12,105 @@ static LOGGER_INIT: Once = Once::new();
 
 const WINDOW_SIZE: (u32, u32) = (440, 260);
 
-pub struct View {
+
+struct Window {
     ui: conrod::Ui,
     ids: Ids,
+
+    image_map: conrod::image::Map<glium::texture::Texture2d>,
 
     event_loop: glutin::EventsLoop,
     display: glium::Display,
     renderer: GliumRenderer,
+}
 
-    image_map: conrod::image::Map<glium::texture::Texture2d>,
 
-    visible: bool,
+impl Window {
+    fn new() -> Self {
+        let image_map = conrod::image::Map::new();
+        let mut ui = conrod::UiBuilder::new([WINDOW_SIZE.0 as f64, WINDOW_SIZE.1 as f64])
+            .theme(theme())
+            .build();
+
+        const FONT_BYTES: &'static [u8] = include_bytes!("../assets/Quirk.ttf");
+        let font = conrod::text::Font::from_bytes(FONT_BYTES).unwrap();
+        ui.fonts.insert(font);
+
+        let ids = Ids::new(ui.widget_id_generator());
+
+        let event_loop = glutin::EventsLoop::new();
+        let window = glutin::WindowBuilder::new()
+            .with_dimensions(WINDOW_SIZE.into())
+            .with_always_on_top(true)
+            // .with_decorations(false)
+            .with_resizable(false)
+            .with_title("WOMP");
+
+        let context = glutin::ContextBuilder::new().with_srgb(true);
+        let display = glium::Display::new(window, context, &event_loop).unwrap();
+
+        let renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
+
+        Window {
+            ui, ids,
+            image_map,
+
+            event_loop,
+            display,
+            renderer,
+        }
+    }
+
+    fn update(&mut self, view_state: &mut ViewState, model: &mut Model) {
+        let mut events = Vec::new();
+
+        self.event_loop.poll_events(|e| events.push(e));
+
+        for event in events {
+            use glutin::{Event, WindowEvent};
+
+            if let Some(event) = conrod::backend::winit::convert_event(event.clone(), &self.display) {
+                self.ui.handle_event(event);
+            }
+
+            // if let Event::WindowEvent{ event, .. } = event {
+            //     self.process_event(event);
+            // }
+        }
+
+        set_widgets(&mut self.ui.set_widgets(), &self.ids, view_state, model);
+
+        // Render the `Ui` and then display it on the screen.
+        if let Some(primitives) = self.ui.draw_if_changed() {
+            use glium::Surface;
+
+            let mut target = self.display.draw();
+            target.clear_color(0.03, 0.03, 0.03, 0.0);
+            self.renderer.fill(&self.display, primitives, &self.image_map);
+            self.renderer.draw(&self.display, &mut target, &self.image_map).unwrap();
+            target.finish().unwrap();
+        }
+    }
+
+    // fn process_event(&mut self, evt: glutin::WindowEvent) {
+    //     use glutin::WindowEvent;
+
+    //     match evt {
+    //         _ => {}
+    //     }
+    // }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.display.gl_window().hide();
+    }
+}
+
+
+
+pub struct View {
+    window: Option<Window>,
 
     model: Model,
     view_state: ViewState,
@@ -49,45 +135,15 @@ impl View {
                     Config::default(),
                     file
                 ).unwrap();
+
+                log_panics::init();
             }
 
-            info!("Logging enabled");
+            log::info!("Logging enabled");
         });
 
-        let event_loop = glutin::EventsLoop::new();
-        let window = glutin::WindowBuilder::new()
-            .with_dimensions(WINDOW_SIZE.into())
-            .with_always_on_top(true)
-            .with_resizable(false)
-            .with_visibility(false)
-            .with_title("WOMP");
-
-        let context = glutin::ContextBuilder::new();
-        let display = glium::Display::new(window, context, &event_loop).unwrap();
-
-        let renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
-
-        let image_map = conrod::image::Map::new();
-        let mut ui = conrod::UiBuilder::new([WINDOW_SIZE.0 as f64, WINDOW_SIZE.1 as f64])
-            .theme(theme())
-            .build();
-
-        const FONT_BYTES: &'static [u8] = include_bytes!("../assets/Quirk.ttf");
-        let font = conrod::text::Font::from_bytes(FONT_BYTES).unwrap();
-        ui.fonts.insert(font);
-
-        let ids = Ids::new(ui.widget_id_generator());
-
         View {
-            ui,
-            ids,
-
-            event_loop,
-            display,
-            renderer,
-            image_map,
-
-            visible: false,
+            window: None,
 
             model: init_state,
             view_state: ViewState::new(),
@@ -105,51 +161,20 @@ impl Editor for View {
     fn position(&self) -> (i32, i32) { (0, 0) }
 
     fn open(&mut self, _: *mut c_void) {
-        self.display.gl_window().show();
-        self.display.gl_window().set_always_on_top(true);
-        self.visible = true;
+        log::info!("open");
+        self.window = Some(Window::new());
     }
 
     fn close(&mut self) {
-        self.display.gl_window().hide();
-        self.visible = false;
+        log::info!("close");
+        self.window = None;
     }
 
-    fn is_open(&mut self) -> bool { self.visible }
+    fn is_open(&mut self) -> bool { self.window.is_some() }
 
     fn idle(&mut self) {
-        let mut events = Vec::new();
-
-        self.event_loop.poll_events(|e| events.push(e));
-
-        for event in events {
-            use glutin::{Event, WindowEvent};
-
-            if let Some(event) = conrod::backend::winit::convert_event(event.clone(), &self.display) {
-                self.ui.handle_event(event);
-            }
-
-            match event {
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => self.close(),
-                    _ => {}
-                }
-
-                _ => {}
-            }
-        }
-
-        set_widgets(&mut self.ui.set_widgets(), &self.ids, &mut self.view_state, &mut self.model);
-
-        // Render the `Ui` and then display it on the screen.
-        if let Some(primitives) = self.ui.draw_if_changed() {
-            use glium::Surface;
-
-            let mut target = self.display.draw();
-            target.clear_color(0.03, 0.03, 0.03, 1.0);
-            self.renderer.fill(&self.display, primitives, &self.image_map);
-            self.renderer.draw(&self.display, &mut target, &self.image_map).unwrap();
-            target.finish().unwrap();
+        if let Some(window) = &mut self.window {
+            window.update(&mut self.view_state, &mut self.model);
         }
     }
 }

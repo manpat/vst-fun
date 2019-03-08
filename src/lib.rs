@@ -1,6 +1,3 @@
-use log::{info, warn};
-use vst::plugin_main;
-
 use vst::plugin::{Info, CanDo, Plugin, Category as VstCategory};
 use vst::editor::Editor;
 use vst::buffer::AudioBuffer as VstAudioBuffer;
@@ -25,7 +22,9 @@ struct BasicPlugin {
 
 impl Plugin for BasicPlugin {
     fn get_info(&self) -> Info {
-        info!("get_info");
+        log::info!("get_info");
+
+        let parameters = self.prev_model.parameter_map().len() as _;
 
         Info {
             name: "GUI Test".to_string(),
@@ -34,6 +33,7 @@ impl Plugin for BasicPlugin {
 
             category: VstCategory::Synth,
 
+            parameters,
             outputs: 1,
 
             ..Info::default()
@@ -51,6 +51,19 @@ impl Plugin for BasicPlugin {
 
     fn set_block_size(&mut self, size: i64) { self.synth_ctx.set_buffer_size(size as _) }
     fn set_sample_rate(&mut self, rate: f32) { self.synth_ctx.set_sample_rate(rate) }
+
+    fn get_parameter(&self, index: i32) -> f32 {
+        self.prev_model.parameter_map()
+            .get(index as usize)
+            .map(|&(_, v)| v)
+            .unwrap_or(0.0)
+    }
+
+    fn set_parameter(&mut self, index: i32, val: f32) {
+        if let Some(pv) = self.prev_model.parameter_map_mut().get_mut(index as usize) {
+            *pv.1 = val;
+        }
+    }
 
     fn process(&mut self, out_buf: &mut VstAudioBuffer<f32>) {
         assert!(out_buf.output_count() == 1);
@@ -72,7 +85,7 @@ impl Plugin for BasicPlugin {
             let out_buf = out_buf.split().1.get_mut(0);
             buf.copy_to(out_buf);
         } else {
-            warn!("Buffer size mismatch in plugin process");
+            log::warn!("Buffer size mismatch in plugin process");
         }
 
         self.synth_ctx.queue_empty_buffer(buf).unwrap();
@@ -102,6 +115,7 @@ impl Default for BasicPlugin {
 
         let freq = s.new_parameter();
         let trigger = s.new_parameter();
+
         let cutoff_dip = s.new_parameter();
         let lfo_depth = s.new_parameter();
         let filter_lfo_depth = s.new_parameter();
@@ -221,4 +235,4 @@ impl BasicPlugin {
 }
 
 
-plugin_main!(BasicPlugin); // Important!
+vst::plugin_main!(BasicPlugin);
